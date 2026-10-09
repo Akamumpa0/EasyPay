@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Merchant {
+  id                    String                       @id @default(uuid())
+  email                 String                       @unique
+  business_name         String
+  password_hash         String
+  api_key_public        String                       @unique
+  api_key_secret        String // Hashed
+  status                String                       @default("active") // active, suspended
+  billing_plan          String                       @default("free") // free, pro, enterprise
+  platform_fee_percent  Float                        @default(0.5)
+  created_at            DateTime                     @default(now())
+  credentials           MerchantProviderCredential[]
+  transactions          Transaction[]
+  payouts               Payout[]
+  usage_records         UsageRecord[]
+}
+
+model Provider {
+  id                    String                       @id @default(uuid())
+  name                  String                       @unique // flutterwave, paystack
+  is_active             Boolean                      @default(true)
+  priority              Int                          @default(1)
+  supported_currencies  String[]                     // ["NGN", "USD", "GHS"]
+  credentials           MerchantProviderCredential[]
+}
+
+model MerchantProviderCredential {
+  id                    String   @id @default(uuid())
+  merchant_id           String
+  provider_id           String
+  encrypted_api_key     String
+  encrypted_secret_key  String
+  is_live_mode          Boolean  @default(false)
+  
+  merchant              Merchant @relation(fields: [merchant_id], references: [id])
+  provider              Provider @relation(fields: [provider_id], references: [id])
+
+  @@unique([merchant_id, provider_id, is_live_mode])
+}
+
+model Transaction {
+  id                      String         @id @default(uuid())
+  merchant_id             String
+  provider_used           String
+  provider_transaction_id String?        // Provider's own reference ID (e.g. Paystack reference)
+  amount                  Float
+  currency                String
+  status                  String         @default("pending") // pending, success, failed, reversed
+  idempotency_key         String
+  customer_email          String
+  platform_fee_amount     Float          @default(0)
+  provider_fee_amount     Float?
+  raw_provider_response   Json?
+  created_at              DateTime       @default(now())
+  updated_at              DateTime       @updatedAt
+
+  merchant                Merchant       @relation(fields: [merchant_id], references: [id])
+  webhook_events          WebhookEvent[]
+
+  @@unique([merchant_id, idempotency_key])
+  @@index([provider_transaction_id])
+}
+
+model WebhookEvent {
+  id             String      @id @default(uuid())
+  transaction_id String
+  provider       String
+  payload        Json
+  verified       Boolean     @default(false)
+  processed_at   DateTime?
+
+  transaction    Transaction @relation(fields: [transaction_id], references: [id])
+}
+
+model UsageRecord {
+  id                         String   @id @default(uuid())
+  merchant_id                String
+  transaction_count          Int      @default(0)
+  total_platform_fees_earned Float    @default(0)
+  period                     String   // e.g. "2023-10"
+
+  merchant                   Merchant @relation(fields: [merchant_id], references: [id])
+
+  @@unique([merchant_id, period])
+}
+
+model Payout {
+  id                         String         @id @default(uuid())
+  merchant_id                String
+  provider_used              String
+  amount                     Float
+  currency                   String
+  status                     String         @default("pending") // pending, success, failed
+  idempotency_key            String
+  destination_account_number String
+  destination_bank_code      String
+  raw_provider_response      Json?
+  created_at                 DateTime       @default(now())
+  updated_at                 DateTime       @updatedAt
+
+  merchant                   Merchant       @relation(fields: [merchant_id], references: [id])
+  @@unique([merchant_id, idempotency_key])
+}
